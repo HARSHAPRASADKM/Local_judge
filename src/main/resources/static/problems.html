@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Problems</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("practice_theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">Local<span>Judge</span></a>
+    <nav class="nav" id="nav" aria-label="Main navigation"></nav>
+  </header>
+  <main class="wrap">
+    <h1 class="hero">Your problems</h1>
+    <div class="row" style="margin:0.9rem 0">
+      <input id="q" type="search" placeholder="Search title or topic…" aria-label="Search problems by title or topic" style="max-width:320px" />
+      <div class="presets" role="group" aria-label="Filter by difficulty" style="margin:0">
+        <button type="button" class="chip on" data-d="" aria-pressed="true">All</button>
+        <button type="button" class="chip" data-d="EASY" aria-pressed="false">Easy</button>
+        <button type="button" class="chip" data-d="MEDIUM" aria-pressed="false">Medium</button>
+        <button type="button" class="chip" data-d="HARD" aria-pressed="false">Hard</button>
+      </div>
+      <select id="sort" aria-label="Sort problems" style="max-width:190px">
+        <option value="new">Newest first</option>
+        <option value="old">Oldest first</option>
+        <option value="title">Title (A–Z)</option>
+        <option value="diff">Difficulty</option>
+      </select>
+      <span class="muted" id="count" role="status" aria-live="polite"></span>
+    </div>
+    <div class="card js-reveal">
+      <div class="table-scroll">
+        <table class="table" id="tbl">
+          <thead><tr><th>Title</th><th>Difficulty</th><th>Topics</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="empty" class="empty" hidden>
+        <span class="big">&#9776;</span>
+        <p>No matching problems.</p>
+        <a class="btn" href="/generate.html">Generate a problem</a>
+      </div>
+    </div>
+  </main>
+  <script src="/js/api.js"></script>
+  <script>
+    if (!requireAuth()) { /* redirecting */ }
+    else {
+      renderNav("list");
+      observeReveal();
+      let all = [];
+      let diff = "";
+      let sort = "new";
+      const DIFF_ORDER = { EASY: 0, MEDIUM: 1, HARD: 2 };
+      const tb = document.querySelector("#tbl tbody");
+      skeletonRows(tb, 4, 4);
+
+      api("/api/problems").then(list => {
+        all = list;
+        render();
+      }).catch(e => {
+        document.getElementById("empty").hidden = false;
+        document.getElementById("empty").innerHTML = '<p class="error">' + escapeHtml(e.message) + "</p>";
+        toast(e.message, "error");
+      });
+
+      function render() {
+        const q = (document.getElementById("q").value || "").toLowerCase().trim();
+        let list = all.filter(p =>
+          (!diff || p.difficulty === diff) &&
+          (!q || (p.title || "").toLowerCase().includes(q) || (p.topicTags || "").toLowerCase().includes(q))
+        );
+        const byNew = (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        if (sort === "new") list.sort(byNew);
+        else if (sort === "old") list.sort((a, b) => byNew(b, a));
+        else if (sort === "title") list.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+        else if (sort === "diff") list.sort((a, b) =>
+          (DIFF_ORDER[a.difficulty] ?? 9) - (DIFF_ORDER[b.difficulty] ?? 9));
+
+        document.getElementById("count").textContent = list.length + " of " + all.length;
+        document.getElementById("empty").hidden = list.length > 0;
+        document.getElementById("tbl").style.display = list.length ? "" : "none";
+
+        tb.innerHTML = list.map((p, i) => `<tr class="reveal" style="--d:${Math.min(i, 12) * 45}ms">
+          <td><a href="/solve.html?id=${p.id}">${escapeHtml(p.title)}</a></td>
+          <td><span class="badge ${escapeHtml(p.difficulty || "")}">${escapeHtml(p.difficulty || "")}</span></td>
+          <td class="muted">${escapeHtml(p.topicTags)}</td>
+          <td><span class="badge ${p.verified ? "pill-ok" : "pill-warn"}" title="${p.verified ? "Reference solution matches every test" : "Tests may be inconsistent — open the problem to re-check"}">${p.verified ? "verified" : "unverified"}</span></td>
+        </tr>`).join("");
+      }
+
+      document.getElementById("q").addEventListener("input", render);
+      document.getElementById("sort").addEventListener("change", (e) => { sort = e.target.value; render(); });
+      document.querySelectorAll(".chip").forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll(".chip").forEach(b => {
+            b.classList.remove("on");
+            b.setAttribute("aria-pressed", "false");
+          });
+          btn.classList.add("on");
+          btn.setAttribute("aria-pressed", "true");
+          diff = btn.dataset.d;
+          render();
+        };
+      });
+    }
+  </script>
+</body>
+</html>

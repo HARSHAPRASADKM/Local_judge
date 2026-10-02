@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Generate</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("practice_theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">Local<span>Judge</span></a>
+    <nav class="nav" id="nav" aria-label="Main navigation"></nav>
+  </header>
+  <main class="wrap">
+    <h1 class="hero">Generate a problem</h1>
+    <p class="muted">Ollama runs locally. Only one generate/hint job at a time. This can take a minute.</p>
+    <div class="card js-reveal">
+      <p id="healthBanner" class="error" role="alert" hidden></p>
+      <div class="presets" role="group" aria-label="Problem presets">
+        <button type="button" class="chip" data-p="Easy array problem with two pointers" data-d="EASY" data-t="arrays">Easy arrays</button>
+        <button type="button" class="chip" data-p="Medium dynamic programming on a 1D array" data-d="MEDIUM" data-t="dp">Medium DP</button>
+        <button type="button" class="chip" data-p="Graph BFS shortest path on an unweighted graph" data-d="MEDIUM" data-t="graphs">Graph BFS</button>
+        <button type="button" class="chip" data-p="Interview-style 30 minute hashing problem" data-d="MEDIUM" data-t="hashing">Interview 30-min</button>
+      </div>
+      <form id="genForm">
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty">
+          <option>EASY</option>
+          <option selected>MEDIUM</option>
+          <option>HARD</option>
+        </select>
+
+        <label for="topic">Topic (optional)</label>
+        <input id="topic" placeholder="arrays, dp, graphs..." />
+
+        <label for="prompt">Your request</label>
+        <textarea id="prompt" placeholder="e.g. Easy two-sum style problem using stdin/stdout"></textarea>
+        <p class="muted" style="font-size:.8rem;margin:.45rem 0 0">
+          Programs read stdin and write stdout. Java and Python only. The saved problem includes 2+ public and 2+ hidden tests.
+        </p>
+
+        <div class="row" style="margin-top:1rem">
+          <button id="go" type="submit">Generate and validate tests</button>
+          <span class="muted" id="hintLine"></span>
+        </div>
+      </form>
+      <p id="msg" role="status" aria-live="polite"></p>
+    </div>
+  </main>
+  <script src="/js/api.js"></script>
+  <script>
+    if (!requireAuth()) { /* redirecting */ }
+    else {
+      renderNav("gen");
+      observeReveal();
+
+      const STEPS = [
+        { key: "prompt", label: "Prompting the local model" },
+        { key: "parse", label: "Parsing the generated JSON" },
+        { key: "tests", label: "Checking test structure" },
+        { key: "selfcheck", label: "Self-checking the reference solution" },
+        { key: "save", label: "Saving the verified problem" }
+      ];
+
+      const params = new URLSearchParams(location.search);
+      if (params.get("topic")) document.getElementById("topic").value = params.get("topic");
+      if (params.get("difficulty")) document.getElementById("difficulty").value = params.get("difficulty").toUpperCase();
+
+      api("/api/dashboard").then(d => {
+        if (d.suggestedTopic && !document.getElementById("topic").value) {
+          document.getElementById("topic").value = d.suggestedTopic;
+          document.getElementById("hintLine").textContent = "Prefilled from your weakest topic.";
+        }
+      }).catch(() => {});
+
+      const goBtn = document.getElementById("go");
+      api("/api/ai/health").then(h => {
+        const banner = document.getElementById("healthBanner");
+        if (h.ollama !== "up") {
+          banner.hidden = false;
+          banner.innerHTML = "Ollama is not reachable at http://127.0.0.1:11434. Start it with <code>ollama serve</code>, then reload this page.";
+          goBtn.disabled = true;
+        } else if (!h.modelInstalled) {
+          banner.hidden = false;
+          banner.innerHTML = "Model <code>" + escapeHtml(h.model) + "</code> is not installed. Run <code>ollama pull " + escapeHtml(h.model) + "</code>, then reload this page.";
+          goBtn.disabled = true;
+        } else {
+          banner.hidden = true;
+        }
+      }).catch(() => {});
+
+      document.querySelectorAll(".chip").forEach(btn => {
+        btn.onclick = () => {
+          document.querySelectorAll(".chip").forEach(b => b.classList.remove("on"));
+          btn.classList.add("on");
+          document.getElementById("prompt").value = btn.dataset.p;
+          if (btn.dataset.d) document.getElementById("difficulty").value = btn.dataset.d;
+          if (btn.dataset.t) document.getElementById("topic").value = btn.dataset.t;
+        };
+      });
+
+      let overlay = null, elapsedTimer = null, startedAt = 0, controller = null, finished = false;
+
+      function showOverlay() {
+        overlay = document.createElement("div");
+        overlay.className = "overlay";
+        overlay.innerHTML = `
+          <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="genTitle">
+            <h3 id="genTitle" style="margin:.2rem 0 .1rem">Generating your problem</h3>
+            <p class="muted" style="margin:.2rem 0 0;font-size:.88rem">
+              Streamed live from your machine — one job at a time.
+            </p>
+            <ul class="steps" id="genSteps">
+              ${STEPS.map((s, i) => `<li class="step" data-i="${i}"><span class="dot">${i + 1}</span><span>${escapeHtml(s.label)}</span></li>`).join("")}
+            </ul>
+            <div class="gen-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="genBarWrap">
+              <span id="genBar" style="animation:none;width:0%;transition:width .45s ease"></span>
+            </div>
+            <p class="gen-elapsed" id="genElapsed">elapsed 0s</p>
+            <p class="muted" id="genNote" style="font-size:.82rem;min-height:1.2em;margin:.3rem 0 0"></p>
+            <div id="genError" class="gen-error" role="alert" hidden></div>
+            <div class="row" style="margin-top:1.2rem;justify-content:flex-end">
+              <button class="secondary" id="cancelBtn" type="button">Stop waiting</button>
+              <button class="green" id="retryBtn" type="button" hidden>Retry</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        startedAt = Date.now();
+        elapsedTimer = setInterval(() => {
+          const s = Math.round((Date.now() - startedAt) / 1000);
+          const el = document.getElementById("genElapsed");
+          if (el) el.textContent = "elapsed " + s + "s";
+        }, 500);
+
+        document.getElementById("cancelBtn").onclick = () => {
+          if (controller) controller.abort();
+          finishOverlay();
+          resetButtons();
+          setMsg("msg", "Stopped waiting. The server may still be finishing this job.", false);
+        };
+        document.getElementById("retryBtn").onclick = () => {
+          finishOverlay();
+          resetButtons();
+          submit();
+        };
+      }
+
+      function markSteps(upto) {
+        document.querySelectorAll("#genSteps .step").forEach((el, idx) => {
+          el.classList.toggle("done", idx < upto);
+          el.classList.toggle("active", idx === upto);
+          const dot = el.querySelector(".dot");
+          if (dot) dot.textContent = idx < upto ? "✓" : String(idx + 1);
+        });
+        setProgress(Math.round(100 * Math.min(upto, STEPS.length) / STEPS.length));
+      }
+
+      function setProgress(pct) {
+        const bar = document.getElementById("genBar");
+        const wrap = document.getElementById("genBarWrap");
+        if (bar) bar.style.width = pct + "%";
+        if (wrap) wrap.setAttribute("aria-valuenow", String(pct));
+      }
+
+      function handleStage(stage) {
+        if (!stage || !stage.key) return;
+        if (stage.key === "retry") {
+          const note = document.getElementById("genNote");
+          if (note) note.textContent = stage.label || "";
+          return;
+        }
+        const idx = STEPS.findIndex(s => s.key === stage.key);
+        if (idx >= 0) markSteps(idx);
+      }
+
+      function finishOverlay() {
+        clearInterval(elapsedTimer); elapsedTimer = null;
+        if (overlay) { overlay.remove(); overlay = null; }
+      }
+
+      function showOverlayError(message) {
+        finished = true;
+        markSteps(STEPS.length);
+        const box = document.getElementById("genError");
+        if (box) { box.hidden = false; box.textContent = message; }
+        const cancel = document.getElementById("cancelBtn");
+        if (cancel) cancel.textContent = "Close";
+        const retry = document.getElementById("retryBtn");
+        if (retry) retry.hidden = false;
+      }
+
+      function resetButtons() {
+        const btn = document.getElementById("go");
+        if (!btn) return;
+        btn.disabled = false;
+        setBusy(btn, false);
+      }
+
+      async function submit() {
+        const btn = document.getElementById("go");
+        const prompt = document.getElementById("prompt").value;
+        if (!prompt.trim()) { setMsg("msg", "Describe the problem you want.", false); return; }
+        btn.disabled = true;
+        setBusy(btn, true, "Generating");
+        showOverlay();
+        markSteps(0);
+        finished = false;
+        controller = new AbortController();
+        const myController = controller;
+
+        try {
+          await streamApi("/api/problems/generate", {
+            method: "POST",
+            signal: controller.signal,
+            body: JSON.stringify({
+              prompt: prompt,
+              difficulty: document.getElementById("difficulty").value,
+              topic: document.getElementById("topic").value
+            })
+          }, (msg) => {
+            if (msg.event === "stage") handleStage(msg.data);
+            else if (msg.event === "done") {
+              finished = true;
+              markSteps(STEPS.length);
+              setProgress(100);
+              toast("Problem generated: " + msg.data.title, "success");
+              setTimeout(() => { location.href = "/solve.html?id=" + msg.data.id; }, 600);
+            } else if (msg.event === "error") {
+              showOverlayError((msg.data && msg.data.message) || "Generation failed.");
+            }
+          });
+
+          if (!finished) {
+            showOverlayError("Generation ended before the problem was saved. Please try again.");
+          }
+        } catch (e) {
+          if (e.name === "AbortError") return;
+          if (overlay) showOverlayError(e.message);
+          else setMsg("msg", e.message, false);
+        } finally {
+          if (controller === myController) resetButtons();
+        }
+      }
+
+      document.getElementById("genForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        submit();
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+server:
+  port: 8080
+  tomcat:
+    connection-timeout: 200000
+
+spring:
+  application:
+    name: practice-platform
+  datasource:
+    url: jdbc:mysql://localhost:3306/practice?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: practice_user
+    password: personal_leetcode
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  jackson:
+    serialization:
+      WRITE_DATES_AS_TIMESTAMPS: false
+
+app:
+  jwt-secret: "local-practice-platform-hs256-secret-key-32b+"
+  jwt-expiration-ms: 86400000
+  ollama:
+    base-url: http://127.0.0.1:11434
+    model: qwen2.5-coder:1.5b
+    timeout-seconds: 300
+  judge:
+    timeout-seconds: 5
+    memory-mb: 256
+    prefer-docker: true
+  hints:
+    fail-threshold: 3

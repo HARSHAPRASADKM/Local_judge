@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Solve</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("practice_theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">Local<span>Judge</span></a>
+    <nav class="nav" id="nav" aria-label="Main navigation"></nav>
+  </header>
+
+  <div class="split" id="split">
+    <section class="solve-left card" aria-label="Problem details">
+      <div id="probHead">
+        <div class="skel" style="width:55%;height:1.5rem;margin:.4rem 0"></div>
+        <div class="skel" style="width:35%;height:.9rem;margin:.5rem 0"></div>
+        <div class="skel" style="width:100%;height:.9rem"></div>
+        <div class="skel" style="width:92%;height:.9rem;margin-top:.4rem"></div>
+      </div>
+      <div id="probBody" hidden>
+        <h2 id="title"></h2>
+        <p><span class="badge" id="diff"></span> <span class="muted" id="tags"></span>
+          <span id="unverified" class="error"></span></p>
+        <p id="statement"></p>
+        <h3>Constraints</h3>
+        <p id="constraints" class="muted"></p>
+
+        <div class="section">
+          <h3>Examples <button class="copy-btn" type="button" id="copyExample" style="position:static;margin-left:auto">Copy</button></h3>
+        </div>
+        <div class="tabs" id="exampleTabs" role="tablist"></div>
+        <div class="tab-panes" id="examplePanes"></div>
+        <p class="muted" id="hiddenCount"></p>
+
+        <div class="acc-item">
+          <button class="acc-head" type="button">Notes <span class="caret">›</span></button>
+          <div class="acc-body"><div><div class="acc-inner">
+            <textarea id="note" placeholder="Your notes stay on this site."></textarea>
+            <div class="row" style="margin-top:.6rem">
+              <button class="secondary" id="saveNote" type="button">Save notes</button>
+            </div>
+          </div></div></div>
+        </div>
+
+        <div class="acc-item open">
+          <button class="acc-head" type="button">Hints <span class="caret">›</span></button>
+          <div class="acc-body"><div><div class="acc-inner">
+            <p class="hint-status" id="hintStatus"></p>
+            <div class="row">
+              <button id="hintBtn" type="button" disabled>Ask hint</button>
+            </div>
+            <div id="hintList" style="margin-top:.7rem"></div>
+          </div></div></div>
+        </div>
+
+        <div class="acc-item">
+          <button class="acc-head" type="button">Interview timer <span class="caret">›</span></button>
+          <div class="acc-body"><div><div class="acc-inner">
+            <div class="row">
+              <div class="timer-wrap" id="timerWrap">
+                <svg width="104" height="104" viewBox="0 0 104 104" aria-hidden="true">
+                  <circle class="timer-track" cx="52" cy="52" r="45" fill="none" stroke-width="8"></circle>
+                  <circle class="timer-ring" id="timerRing" cx="52" cy="52" r="45" fill="none" stroke-width="8"
+                    stroke-linecap="round" stroke-dasharray="282.7" stroke-dashoffset="0"></circle>
+                </svg>
+                <div class="timer-text" id="timer" role="timer" aria-live="off">30:00</div>
+              </div>
+              <div>
+                <button class="secondary" id="timerBtn" type="button">Start timer</button>
+                <p class="muted" style="font-size:.8rem;margin:.5rem 0 0">30 minute interview mode.</p>
+              </div>
+            </div>
+          </div></div></div>
+        </div>
+
+        <div class="acc-item">
+          <button class="acc-head" type="button">Attempt diff <span class="caret">›</span></button>
+          <div class="acc-body"><div><div class="acc-inner">
+            <pre class="io" id="diffBox">Submit twice to compare your last two codes.</pre>
+          </div></div></div>
+        </div>
+
+        <div class="acc-item">
+          <button class="acc-head" type="button">History <span class="caret">›</span></button>
+          <div class="acc-body"><div><div class="acc-inner">
+            <div id="history"></div>
+          </div></div></div>
+        </div>
+
+        <div class="row" style="margin-top:1rem">
+          <button class="secondary" id="retryBtn" type="button">Practice again</button>
+          <button class="secondary" id="mindfulBtn" type="button">Mindful break</button>
+          <button class="danger" id="reportBtn" type="button">This test looks wrong</button>
+          <button class="secondary" id="reviewBtn" type="button" hidden>Post-accept review</button>
+        </div>
+        <pre class="io" id="reviewBox" hidden></pre>
+      </div>
+    </section>
+
+    <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize panels"></div>
+
+    <section class="solve-right" aria-label="Code editor">
+      <div class="editor-toolbar">
+        <label for="lang" class="muted" style="margin:0">Language</label>
+        <select id="lang" aria-label="Programming language">
+          <option value="python">Python</option>
+          <option value="java">Java</option>
+        </select>
+        <span class="grow"></span>
+        <button class="secondary" id="expandBtn" type="button" aria-pressed="false">Expand editor</button>
+        <button id="runBtn" type="button">Run tests</button>
+        <button class="green" id="submitBtn" type="button">Submit<span class="kbd">Ctrl+Enter</span></button>
+      </div>
+      <div style="position:relative">
+        <div id="editor" class="editor"></div>
+        <div class="editor-load" id="editorLoad">Loading editor…</div>
+      </div>
+      <h3>Result</h3>
+      <div id="result" class="verdict neutral" role="status" aria-live="polite">
+        <div class="verdict-head">Ready to judge<span class="tag">run or submit</span></div>
+        <div class="verdict-summary">Run the public tests while you iterate. Submit to check all tests, including hidden ones.</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs/loader.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/solve.js"></script>
+</body>
+</html>

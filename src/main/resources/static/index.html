@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("practice_theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">Local<span>Judge</span></a>
+    <nav class="nav" id="nav" aria-label="Main navigation"></nav>
+  </header>
+  <main class="wrap">
+    <p class="muted" id="hello" style="margin:0.2rem 0 0"></p>
+    <h1 class="hero">Keep the streak alive <span class="flame">&#128293;</span></h1>
+
+    <div class="grid-3" id="stats" style="margin:1.2rem 0 1rem"></div>
+
+    <div class="grid-3">
+      <div class="card lift js-reveal" style="--d:340ms">
+        <div class="muted">Activity — last 7 days</div>
+        <div class="heat" id="heat"></div>
+        <div class="legend">
+          <span class="k-attempts"><i></i>attempts</span>
+          <span class="k-accepted"><i></i>accepted</span>
+        </div>
+      </div>
+      <div class="card lift js-reveal" style="--d:420ms;grid-column:span 2">
+        <p style="margin-top:0">Suggested weak topic: <strong id="weak">none yet</strong></p>
+        <p class="muted">Local model: <span id="model"></span></p>
+        <div class="row">
+          <a class="btn" href="/generate.html">Generate a problem</a>
+          <button class="btn secondary" id="practiceWeak" type="button" hidden>Practice this topic</button>
+          <a class="btn secondary" href="/problems.html">Open problem list</a>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/js/api.js"></script>
+  <script>
+    if (!requireAuth()) { /* redirecting */ }
+    else {
+      renderNav("dash");
+      observeReveal();
+      skeletonBlocks(document.getElementById("stats"), 6);
+      document.getElementById("heat").innerHTML =
+        Array.from({ length: 7 }).map(() =>
+          '<div class="day zero"><div class="skel" style="height:40px;width:100%"></div><div class="skel" style="height:.6rem;width:70%"></div></div>'
+        ).join("");
+
+      api("/api/dashboard").then(d => {
+        if (d.username) localStorage.setItem("practice_user", d.username);
+        document.getElementById("hello").textContent = "Signed in as " + d.username + " (" + d.email + ")";
+        renderStats(d);
+        renderHeat(d.activity || []);
+        document.getElementById("weak").textContent = d.suggestedTopic || "none yet";
+        document.getElementById("model").textContent = d.model;
+        const weakBtn = document.getElementById("practiceWeak");
+        if (d.suggestedTopic) {
+          weakBtn.hidden = false;
+          weakBtn.onclick = () =>
+            location.href = "/generate.html?topic=" + encodeURIComponent(d.suggestedTopic);
+        }
+        observeReveal();
+      }).catch(e => {
+        document.getElementById("stats").innerHTML =
+          '<div class="card"><p class="error">' + escapeHtml(e.message) + "</p></div>";
+        toast(e.message, "error");
+      });
+
+      function rateColor(rate) {
+        if (rate >= 60) return "var(--green)";
+        if (rate >= 30) return "var(--medium-fg)";
+        return "var(--red)";
+      }
+
+      function renderStats(d) {
+        const cards = [
+          { id: "streak", label: "Streak (days)", value: d.streak, extra: d.streak > 0 ? "day" + (d.streak === 1 ? "" : "s") + " in a row" : "start today" },
+          { id: "acc", label: "Accepted", value: d.totalAccepted, extra: "solved" },
+          { id: "ring" },
+          { id: "att", label: "Submits", value: d.totalAttempts, extra: "total runs" },
+          { id: "hints", label: "Hints used", value: d.hintUsage, extra: "hints" },
+          { id: "pc", label: "Problems saved", value: d.problemCount, extra: "in your library" }
+        ];
+        document.getElementById("stats").innerHTML = cards.map((c, i) => {
+          const delay = `--d:${i * 70}ms`;
+          if (c.id === "ring") {
+            const rate = Number(d.acceptRate) || 0;
+            return `<div class="card lift js-reveal" style="${delay}">
+              <div class="muted">Accept rate</div>
+              <div class="ring-wrap" style="margin-top:.6rem">
+                <svg class="ring" width="76" height="76" viewBox="0 0 76 76" aria-hidden="true">
+                  <circle class="track" cx="38" cy="38" r="31" fill="none" stroke-width="8"></circle>
+                  <circle class="value" id="ringVal" cx="38" cy="38" r="31" fill="none" stroke-width="8"
+                    stroke-linecap="round" stroke-dasharray="194.8" stroke-dashoffset="194.8"
+                    style="stroke:${rateColor(rate)}"></circle>
+                </svg>
+                <div><div class="stat" id="rate">0%</div><div class="muted">accepted</div></div>
+              </div>
+            </div>`;
+          }
+          return `<div class="card lift js-reveal" style="${delay}">
+            <div class="muted stat-label">${c.label}</div>
+            <div class="stat" id="${c.id}">0</div>
+            <div class="muted" style="font-size:.82rem">${c.extra}</div>
+          </div>`;
+        }).join("");
+
+        countUp(document.getElementById("streak"), d.streak);
+        countUp(document.getElementById("acc"), d.totalAccepted);
+        countUp(document.getElementById("att"), d.totalAttempts);
+        countUp(document.getElementById("hints"), d.hintUsage);
+        countUp(document.getElementById("pc"), d.problemCount);
+        countUp(document.getElementById("rate"), d.acceptRate, "%");
+        const ring = document.getElementById("ringVal");
+        const circumference = 194.8;
+        requestAnimationFrame(() => setTimeout(() => {
+          ring.style.strokeDashoffset = circumference * (1 - (Number(d.acceptRate) || 0) / 100);
+        }, 180));
+        observeReveal();
+      }
+
+      function renderHeat(days) {
+        const max = Math.max(1, ...days.map(x => x.attempts));
+        const MAXPX = 72;
+        document.getElementById("heat").innerHTML = days.map((x, i) => {
+          const attempts = x.attempts || 0;
+          const accepted = Math.min(x.accepted || 0, attempts);
+          const totalPx = attempts ? Math.max(6, Math.round(MAXPX * attempts / max)) : 6;
+          const accPx = attempts ? Math.round(totalPx * accepted / attempts) : 0;
+          const restPx = totalPx - accPx;
+          const stack = attempts
+            ? (restPx > 0 ? `<div class="bar" style="height:${restPx}px;--d:${i * 70}ms"></div>` : "")
+              + (accPx > 0 ? `<div class="bar accepted-bar" style="height:${accPx}px;--d:${i * 70}ms"></div>` : "")
+            : '<div class="bar" style="height:6px;min-height:6px;--d:0ms"></div>';
+          return `<div class="day ${attempts ? "" : "zero"}" title="${escapeHtml(x.date)}: ${attempts} attempt(s), ${accepted} accepted">
+            <div class="stack">${stack}</div>
+            <div class="lbl">${escapeHtml(x.date)}</div>
+          </div>`;
+        }).join("");
+      }
+    }
+  </script>
+</body>
+</html>
